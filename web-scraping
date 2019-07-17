@@ -1,0 +1,190 @@
+import pandas as pd
+import re
+#import datetime
+from bs4 import BeautifulSoup
+from datetime import timedelta, datetime
+import requests
+
+
+def remove_duplicates(a):
+    t = []
+    for i in a:
+        if i not in t:
+            t.append(i)
+    return t
+
+#%%
+datelist = []
+for loop in range(0,7):
+    Val1 = (datetime.today() - timedelta(days=int(loop))).strftime('%b %d, %Y').strip(" ")
+    if Val1.count(' ') == 2:
+        datelist.append(Val1) 
+    else:
+        datelist.append(Val1.replace(' ', '',1))
+
+#only need first page of search results because of less frequent postings, but ordered by most recent
+
+ArticleLinks = []
+LinkList = []  
+
+#search results for "series funding"
+BaseUrl = 'https://www.financialexpress.com/?search_scope=1&s=series+funding'
+BaseUrlhtml = requests.get(BaseUrl)
+BaseUrlsoup = BeautifulSoup(BaseUrlhtml.text,'html.parser')
+LinkList = BaseUrlsoup.find('div', class_ = "listing")
+NewsArticles = LinkList.find_all('div', class_="listitembx")
+
+#finds articles within the past week
+for article in NewsArticles:
+    try:
+        if any(s in article.find('span', class_ = "minsago").text.strip() for s in datelist):
+            for j in article.find_all('a', class_ = False):
+                ArticleLinks.append(j.get('href'))
+        else:
+            ''
+    except:
+        continue
+ArticleLinks = remove_duplicates(ArticleLinks)
+
+#%%
+
+FundingArticles = []
+
+for a in range(len(ArticleLinks)): 
+    #opens website url
+    pagehtml = requests.get(ArticleLinks[a])
+    pagesoup = BeautifulSoup(pagehtml.text, 'html.parser')
+    
+    #retrieves header text
+    header = pagesoup.find('h1', class_ = "post-title")
+    subs = header.text.replace(u'\xa0', u' ')
+    
+    #checks for the word raises and $ in header
+    if 'raises $' in subs:
+        FundingArticles.append(ArticleLinks[a])
+
+print(FundingArticles)
+
+#%%
+
+CompanyName = []
+FundingURL = []
+DateRaiseAnnounced = []
+Amount = []
+SeriesRound = []
+Country = [] 
+
+for c in range(len(FundingArticles)):
+    bodyparagraphs = []
+    bodytext = []
+    dollar_counter = 0
+    seriesround_find = 0
+    #opens website url    
+    pagehtmls = requests.get(FundingArticles[c])
+    pagesoups = BeautifulSoup(pagehtmls.text, 'html.parser')
+
+    #retrieves header text
+    headers = pagesoups.find('h1', class_ = "post-title")
+    headerstr = headers.text.replace(u'\xa0', u' ')
+    headertexts = headerstr.split(' ')
+
+    #retrieves body text
+    div_body = pagesoups.find('div', class_ = "post-summary")
+    for f in div_body.select("div.post-summary > p"):
+        bodyparagraphs.append(f.text.replace(u'\xa0', u' '))
+    for g in bodyparagraphs:
+        bodytext.extend(g.split(' '))
+        
+    #retrieves website tag
+    head_tag = pagesoups.find('h2', class_ = "tag-hp-logo")
+    
+    #find $ for funding amount in the header
+    for d in headertexts:
+        if dollar_counter == 0:
+            if '$' in d:
+                FinalDollars = headertexts[headertexts.index(d)] + ' ' + headertexts[headertexts.index(d)+1]
+                Amount.append(FinalDollars)
+                dollar_counter = 1
+    #if no dollar found, amount value = blank
+    if dollar_counter == 0:
+        pass
+    
+    #find the series round in the header
+    for d in headertexts:
+        if seriesround_find == 0:
+            if re.search('Series', d):
+                FinalVal = headertexts[headertexts.index(d) + 1]
+                SeriesRound.append(FinalVal)
+                seriesround_find = 1
+            elif re.search('series-', d):
+                FinalVal = (headertexts[headertexts.index(d) + 1])[-1]
+                SeriesRound.append(FinalVal)
+                seriesround_find = 1
+            elif re.search('series', d):
+                FinalVal = headertexts[headertexts.index(d) + 1]
+                if len(FinalVal) == 1:
+                    SeriesRound.append(FinalVal)                    
+                    seriesround_find = 1
+
+    #find the series round in body if cannot find in header
+    for e in bodytext:
+        if seriesround_find == 0:
+            if re.search('Series', e):
+                FinalVal = bodytext[bodytext.index(e) + 1]
+                SeriesRound.append(FinalVal)                    
+                seriesround_find = 1
+            elif re.search('series-', e):
+                FinalVal = (bodytext[bodytext.index(e) + 1])[-1]
+                SeriesRound.append(FinalVal)
+                seriesround_find = 1
+            elif re.search('series', e):
+                FinalVal = bodytext[bodytext.index(e) + 1]
+                if len(FinalVal) == 1:
+                    SeriesRound.append(FinalVal)                    
+                    seriesround_find = 1
+
+    #if no 'series' found, round value = ' ' 
+    if seriesround_find == 0:
+        SeriesRound.append(' ')
+        pass
+    
+    #find company name in the header
+    for d in headertexts:
+        if re.search('raises', d):
+            FinalVal = headertexts[headertexts.index(d) - 1]
+            CompanyName.append(FinalVal)
+            series_counter = 1
+            
+    #retrieves date text
+    datenumbers = pagesoups.find('div', class_ = "place-line")
+    subheaders = datenumbers.text.replace(u'\xa0', u' ')
+    numbers1 = subheaders.split(' ') 
+    datenumbs = ' '.join(numbers1[1:4])
+    DateRaiseAnnounced.append(datenumbs)
+
+    #finds the country if labelled as "Startup India"
+    try:
+        if 'India' in head_tag.text:
+            Country.append('India')
+    except(AttributeError):
+        Country.append(' ')
+        pass
+    else:
+        pass
+
+    #adds url
+    FundingURL.append(FundingArticles[c])        
+    
+#%%
+
+StartUpFunding = pd.DataFrame( columns = ['Company Name', 'Funding URL', 'Date Raise Announced', 'Amount', 'Series Round', 'Country',])
+
+StartUpFunding['Company Name']= CompanyName
+StartUpFunding['Funding URL']= FundingURL
+StartUpFunding['Date Raise Announced']= DateRaiseAnnounced
+StartUpFunding['Amount']= Amount
+StartUpFunding['Series Round']= SeriesRound
+StartUpFunding['Country']= Country
+
+StartUpFunding.to_csv('FinancialExpressFunding.csv')   
+
